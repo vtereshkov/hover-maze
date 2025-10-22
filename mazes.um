@@ -1,0 +1,510 @@
+import (
+    "std.um"
+
+    "image.um"
+)
+
+type (
+    // Utilities
+
+    Pos* = struct {
+        x, y: int16
+    }
+
+    Line* = struct {
+        start, end: Pos
+    }
+
+    Rect* = struct {
+        min, max: Pos
+    }
+
+    String* = struct {
+        data: str
+    }
+
+    LongString* = struct {
+        dummy: [2]int16
+        data: str
+    }   
+
+    // Static section
+
+    StaticHeader* = struct {
+        rect: Rect
+        numItems: int16
+        name: LongString    
+    }
+
+    StaticItem* = struct {
+        name: String
+        dummy2: int16
+        line: Line
+        dummy3: int16
+        textures: [6]String
+        heights: [2]int16
+        flags: [16]uint8
+        tiledTexture: image::Image
+    }
+
+    Static* = struct {
+        header: StaticHeader
+        items: []StaticItem
+    }
+
+    // Location section
+
+    LocationHeader* = struct {
+        numItems: int16
+        name: LongString        
+    }
+
+    LocationItem* = struct {
+        name: String
+        dummy2: int16
+        pos: Pos
+        flags2: [2]uint8
+        height: int16
+        flags: [4]uint8
+    }
+
+    Location* = struct {
+        header: LocationHeader
+        items: []LocationItem
+    }
+
+    // BSP section
+
+    BSPHeader* = struct {
+        name: LongString
+    }
+
+    BSPIndices* = struct {
+        static, dummy2, right, left: int16
+    }
+
+    BSPItem* = struct {
+        dummy2: [3]uint8
+        line: Line
+        dummy3: [2]uint8
+        indices: BSPIndices
+        dummy: [20]uint8
+    }
+
+    BSPSeparator = [2]uint8
+
+    BSP* = struct {
+        header: BSPHeader
+        items: []BSPItem        
+    }
+
+    // Maze
+
+    Maze* = struct {
+        static: Static
+        location: Location
+        bsp: BSP
+    }
+
+    // Textures
+
+    TexturePalette* = [256][4]uint8
+
+    TextureHeader* = struct {
+        palette: TexturePalette
+        numItems: int16
+        name: LongString
+    }
+
+    TextureBitmapHeader* = struct {
+        width, maxX, height, maxY, logHeight, rawSize, dummy2: uint16 
+    }
+
+    TextureBitmapFooterItem* = struct {
+        dummy: [2]int16 
+    }       
+
+    TextureScanlinePiece* = struct {
+        from, to: int16
+    }
+
+    TextureScanline* = struct {
+        pieces: []TextureScanlinePiece      
+    }
+
+    TextureBitmap* = struct {
+        header: TextureBitmapHeader
+        raw: []uint8
+        numOfSomething: int16
+        scanlines: []TextureScanline
+        footer: []TextureBitmapFooterItem
+    }
+
+    TextureItem* = struct {
+        name: String
+        dummy: [2]int16
+        bitmaps: []TextureBitmap
+        dummy2: [2]uint8
+    }
+
+    TextureImageData* = struct {
+        data: []uint32
+        width, height: int
+    }
+
+    Texture* = struct {
+        header: TextureHeader
+        items: []TextureItem
+        cache: map[struct {name: str; logScale: int}]TextureImageData
+        backgroundTexture, dummyTexture: image::Image
+    }
+)
+
+// Utilities
+
+fn (this: ^String) read(f: std::File) {
+    var length: uint8
+    std::exitif(std::fread(f, &length).item1)
+
+    chars := make([]char, length)
+    std::exitif(std::fread(f, &chars).item1)
+
+    this.data = chars
+}
+
+fn (this: ^LongString) read(f: std::File) {
+    std::exitif(std::fread(f, &this.dummy).item1)
+
+    var length: uint16
+    std::exitif(std::fread(f, &length).item1)
+
+    chars := make([]char, length)
+    std::exitif(std::fread(f, &chars).item1)
+
+    this.data = chars
+
+    std::assert(this.dummy[0] == -1 && this.dummy[1] == 1)
+}
+
+fn (this: ^Line) length(): real {
+    v := Pos{this.end.x - this.start.x, this.end.y - this.start.y}
+
+    return sqrt(v.x * v.x + v.y * v.y)
+}
+
+fn (this: ^Pos) distFrom(line: Line): real {
+    u := Pos{this.x - line.start.x, this.y - line.start.y}
+    v := Pos{line.end.x - line.start.x, line.end.y - line.start.y}
+
+    return (u.x * v.y - u.y * v.x) / sqrt(v.x * v.x + v.y * v.y)
+}
+
+// Static section
+
+fn (this: ^StaticHeader) read(f: std::File) {
+    std::exitif(std::fread(f, &this.rect).item1)
+    std::exitif(std::fread(f, &this.numItems).item1)
+
+    this.name.read(f)
+    std::assert(this.name.data == "CMerlinStatic")
+}
+
+fn (this: ^StaticItem) read(f: std::File) {
+    this.name.read(f)
+
+    std::exitif(std::fread(f, &this.dummy2).item1)
+    std::exitif(std::fread(f, &this.line).item1)
+    std::exitif(std::fread(f, &this.dummy3).item1)
+
+    for _, s^ in this.textures {
+        s.read(f)
+    }
+
+    std::exitif(std::fread(f, &this.heights).item1)
+    std::exitif(std::fread(f, &this.flags).item1)
+
+    std::assert(this.dummy2 == 0 && this.dummy3 == 0)
+}
+
+fn (this: ^Static) read(f: std::File) {
+    this.header.read(f)
+
+    this.items = make([]StaticItem, this.header.numItems)
+    for _, item^ in this.items {
+        item.read(f)
+    }       
+}
+
+// Location section
+
+fn (this: ^LocationHeader) read(f: std::File) {
+    std::exitif(std::fread(f, &this.numItems).item1)
+
+    this.name.read(f)
+    std::assert(this.name.data == "CMerlinLocation")
+}
+
+fn (this: ^LocationItem) read(f: std::File) {
+    this.name.read(f)
+
+    std::exitif(std::fread(f, &this.dummy2).item1)
+    std::exitif(std::fread(f, &this.pos).item1)
+    std::exitif(std::fread(f, &this.flags2).item1)
+    std::exitif(std::fread(f, &this.height).item1)
+    std::exitif(std::fread(f, &this.flags).item1)
+
+    std::assert(this.dummy2 == 0)                   
+}
+
+fn (this: ^Location) read(f: std::File) {
+    this.header.read(f)
+
+    this.items = make([]LocationItem, this.header.numItems)
+    for _, item^ in this.items {
+        item.read(f)
+    }       
+}
+
+// BSP section
+
+fn (this: ^BSPHeader) read(f: std::File) {
+    this.name.read(f)
+    std::assert(this.name.data == "CMerlinBSP")
+}
+
+fn (this: ^BSPItem) read(f: std::File) {
+    std::exitif(std::fread(f, &this.dummy2).item1)
+    std::exitif(std::fread(f, &this.line).item1)
+    std::exitif(std::fread(f, &this.dummy3).item1)
+    std::exitif(std::fread(f, &this.indices).item1)
+    std::exitif(std::fread(f, &this.dummy).item1)
+}
+
+fn (this: ^BSP) check(root: int16 = 0): int {
+    node := this.items[root]
+    count := 1
+
+    if node.indices.left != -1 {
+        child := this.items[node.indices.left]
+
+        std::assert(child.line.start.distFrom(node.line) <= 0)
+        std::assert(child.line.end.distFrom(node.line) <= 0)
+
+        count += this.check(node.indices.left)
+    }
+
+    if node.indices.right != -1 {
+        child := this.items[node.indices.right]
+
+        std::assert(child.line.start.distFrom(node.line) >= 0)
+        std::assert(child.line.end.distFrom(node.line) >= 0)
+
+        count += this.check(node.indices.right)
+    }
+
+    return count        
+}
+
+fn (this: ^BSP) read(f: std::File) {
+    this.header.read(f)
+
+    for true {
+        var item: BSPItem
+        item.read(f)
+        this.items = append(this.items, item)
+
+        var separator: BSPSeparator
+        _, err := std::fread(f, &separator)
+        if std::StdErr(err.code) == .eof {
+            break
+        }   
+    }
+
+    std::assert(this.check() == len(this.items))        
+}
+
+// Maze
+
+fn (this: ^Maze) read*(f: std::File) {
+    this.static.read(f)
+    this.location.read(f)
+    this.bsp.read(f)
+}
+
+// Textures
+
+fn (this: ^TextureHeader) read(f: std::File) {
+    std::exitif(std::fread(f, &this.palette).item1)
+    std::exitif(std::fread(f, &this.numItems).item1)
+    this.name.read(f)
+    std::assert(this.name.data == "CMerlinTexture")
+}
+
+fn (this: ^TextureScanline) read(f: std::File) {
+    var length: int16
+    std::exitif(std::fread(f, &length).item1)
+
+    this.pieces = make([]TextureScanlinePiece, length)
+    for _, piece^ in this.pieces {
+        std::exitif(std::fread(f, piece).item1)
+    }   
+}
+
+fn (this: ^TextureBitmap) actualRawSize(): int {
+    return this.header.rawSize != 0 ? this.header.rawSize : this.header.width * this.header.height
+}
+
+fn (this: ^TextureBitmap) read(f: std::File) {
+    std::exitif(std::fread(f, &this.header).item1)
+    std::assert(this.header.height == 1 << this.header.logHeight)
+
+    //printf("        header = %v\n", this.header)
+
+    this.raw = make([]uint8, this.actualRawSize())
+    std::exitif(std::fread(f, &this.raw).item1)
+
+    std::exitif(std::fread(f, &this.numOfSomething).item1)
+
+    //printf("        numOfSomething = %v\n", this.numOfSomething)
+
+    this.scanlines = make([]TextureScanline, this.header.width)
+    for _, scanline^ in this.scanlines {
+        scanline.read(f)
+    }
+
+    var numFooterItems: int16
+    std::exitif(std::fread(f, &numFooterItems).item1)
+
+    this.footer = make([]TextureBitmapFooterItem, numFooterItems)
+    for _, footerItem^ in this.footer {
+        std::exitif(std::fread(f, footerItem).item1)
+    }
+
+    var dummy: int16
+    std::exitif(std::fread(f, &dummy).item1)    
+
+    //printf("        footer = %v\n", this.footer)      
+}
+
+fn (this: ^TextureBitmap) toImageData(palette: ^TexturePalette, logScale: int): TextureImageData {
+    imageData := make([]uint32, this.header.width * this.header.height)
+
+    rawIndex := 0
+
+    for x := 0; x < this.header.width; x++ {
+        for _, piece in this.scanlines[x].pieces {
+            for y := piece.from >> logScale; y <= piece.to >> logScale; y += 1 {
+                color := palette[this.raw[rawIndex]]
+                imageData[this.header.width * y + x] = (color[0] << 24) | (color[1] << 16) | (color[2] << 8) | 0xFF
+                rawIndex++
+            }
+        }
+    }
+
+    return {imageData, this.header.width, this.header.height}
+}
+
+fn (this: ^TextureItem) read(f: std::File) {
+    this.name.read(f)
+    std::exitif(std::fread(f, &this.dummy).item1)
+
+    //printf("%v %v\n", this.name, this.dummy)
+
+    var numBitmaps: int16 
+    std::exitif(std::fread(f, &numBitmaps).item1)
+
+    this.bitmaps = make([]TextureBitmap, numBitmaps)
+    for _, bitmap^ in this.bitmaps {
+        bitmap.read(f)
+    }
+
+    std::exitif(std::fread(f, &this.dummy2).item1)
+}
+
+fn (this: ^Texture) read*(f: std::File) {
+    this.header.read(f)
+
+    this.items = make([]TextureItem, this.header.numItems)
+    for _, item^ in this.items {
+        item.read(f)
+    }       
+}
+
+fn (this: ^Texture) getItemData(name: str, logScale: int = 0): TextureImageData {
+    if name == "" {
+        return {}
+    }
+
+    if !validkey(this.cache, {name, logScale}) {
+        for _, item^ in this.items {
+            if name == item.name.data {
+                imageData := item.bitmaps[logScale].toImageData(&this.header.palette, logScale)
+                this.cache[{name, logScale}] = imageData
+                return imageData
+            }
+        }
+    }
+
+    return this.cache[{name, logScale}]
+}
+
+fn (this: ^Texture) getBackgroundTexture*(): image::Image {
+    if this.backgroundTexture.validate() {
+        return this.backgroundTexture
+    }
+
+    background := this.getItemData("BACKGRND")
+
+    for _, pix^ in background.data {
+        pix^ |= 0x000000FF
+    }
+
+    image, err := image::mk(background.data, {background.width, background.height})
+    std::exitif(err)
+
+    this.backgroundTexture = image
+    return this.backgroundTexture
+}
+
+fn (this: ^Texture) getItemTexture*(item: ^StaticItem): image::Image {
+    if item.tiledTexture.validate() {
+        return item.tiledTexture
+    }
+
+    if !this.dummyTexture.validate() {
+        this.dummyTexture = image::mk({0, 0, 0, 0}, {2, 2}).item0
+    }
+
+    tile := this.getItemData(item.textures[2].data)
+    if tile == {} {
+        return this.dummyTexture
+    }
+
+    quadWidth := round(item.line.length())
+    quadHeight := item.heights[1] - item.heights[0]
+
+    if quadHeight == 0 {
+        return this.dummyTexture
+    }
+
+    if quadHeight > tile.height {
+        quadWidth = tile.height * quadWidth / quadHeight
+        quadHeight = tile.height
+    }
+
+    quadData := make([]uint32, quadWidth * quadHeight)
+
+    for x := 0; x < quadWidth; x++ {
+        for y := 0; y < quadHeight; y++ {
+            quadData[quadWidth * y + x] = tile.data[tile.width * y + (x % tile.width)]
+        }
+    }
+
+    image, err := image::mk(quadData, {quadWidth, quadHeight})
+    std::exitif(err)
+
+    image.flipv(true)
+
+    item.tiledTexture = image
+    return image    
+}

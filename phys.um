@@ -1,0 +1,56 @@
+import (
+    "mat.um"
+
+    "input.um"
+)
+
+type (
+    State* = struct {
+        pos, vel: mat::Vec
+        rot: mat::Mat
+        att, rate: mat::Vec
+    }
+
+    Control = struct {
+        force, moment: mat::Vec
+    }
+)
+
+const (
+    mass            = 10000.0
+    diam            = 4.0
+    inertia         = 0.4 * mass * (diam / 2.0) * (diam / 2.0)
+
+    force           = 100000.0
+    moment          = 25000.0
+
+    frictionForceFactor  = 10000.0
+    frictionMomentFactor = 10000.0
+)
+
+fn (state: ^State) control(): Control {
+    ctrl := Control{}
+
+    if input::isPressed(.up)     {ctrl.force[0] =  force}
+    if input::isPressed(.down)   {ctrl.force[0] = -force}
+    if input::isPressed(.left)   {ctrl.moment[2] = -moment}
+    if input::isPressed(.right)  {ctrl.moment[2] =  moment}
+
+    return ctrl
+}
+
+fn (state: ^State) update*(dt: real) {
+    ctrl := state.control()
+
+    frictionForce := state.vel.mul(-frictionForceFactor)
+    frictionMoment := state.rate.mul(-frictionMomentFactor)
+
+    state.vel = state.vel.add(state.rot.mulv(ctrl.force).add(frictionForce).mul(dt / mass))
+    state.pos = state.pos.add(state.vel.mul(dt))
+
+    state.rate = state.rate.add(ctrl.moment.add(frictionMoment).mul(dt / inertia))
+    state.rot = state.rot.add(state.rot.mulm(state.rate.toRateMat()).mul(dt)).normalize()
+
+    state.att = state.rot.toAttAngles()
+}
+

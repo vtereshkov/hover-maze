@@ -1,0 +1,41 @@
+import (
+    "std.um"
+    "mat.um"
+
+    "th.um"
+    "window.um"
+
+    "gfx.um"
+    "phys.um"
+)
+
+var (
+    scene: gfx::Scene
+    camera: gfx::Camera
+    state: phys::State
+)
+
+fn init*() {
+    window::setup("Hover! Maze Demo", 800, 600)
+    
+    mazeFile, err := std::fopen("maze1.maz", "rb")
+    std::exitif(err)
+    scene.maze.read(mazeFile)
+    std::fclose(mazeFile)
+
+    texFile, err := std::fopen("text1.tex", "rb")
+    std::exitif(err)
+    scene.texture.read(texFile)
+    std::fclose(texFile)
+
+    state.pos = scene.getHumanLocation()
+    state.rot = mat::Vec{0.0, 0.0, 90.0}.mul(gfx::deg).toAttMat()
+
+    window::onFrame.register({
+        window::setViewport(window::getDims())
+        camera.setup(state.pos, state.rot, window::w, window::h, 30.0 * gfx::deg, 100)
+
+        state.update(th::delta / 1000.0)
+        scene.render(&camera)       
+    })
+}
