@@ -1,6 +1,8 @@
 import (
     "std.um"
+    "mat.um"
 
+    "th.um"
     "image.um"
 )
 
@@ -472,7 +474,7 @@ fn (this: ^Texture) getItemTexture*(item: ^StaticItem): image::Image {
     }
 
     if !this.dummyTexture.validate() {
-        this.dummyTexture = image::mk({0, 0, 0, 0}, {2, 2}).item0
+        this.dummyTexture = image::mk({th::white, th::white, th::white, th::white}, {2, 2}).item0
     }
 
     tile := this.getItemData(item.textures[2].data)
@@ -508,3 +510,8 @@ fn (this: ^Texture) getItemTexture*(item: ^StaticItem): image::Image {
     item.tiledTexture = image
     return image    
 }
+
+fn fromMaze*(pos: Pos, height: int16 = 0): mat::Vec {
+    const mazeScale = 100.0
+    return {pos.y, pos.x, -height}.mul(1.0 / mazeScale)
+} 

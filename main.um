@@ -35,7 +35,7 @@ fn init*() {
         window::setViewport(window::getDims())
         camera.setup(state.pos, state.rot, window::w, window::h, 30.0 * gfx::deg, 100)
 
-        state.update(th::delta / 1000.0)
+        state.update(th::delta / 1000.0, &scene.maze)
         scene.render(&camera)       
     })
 }

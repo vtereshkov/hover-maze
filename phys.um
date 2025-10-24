@@ -2,6 +2,8 @@ import (
     "mat.um"
 
     "input.um"
+
+    "mazes.um"
 )
 
 type (
@@ -9,6 +11,7 @@ type (
         pos, vel: mat::Vec
         rot: mat::Mat
         att, rate: mat::Vec
+        collidingItem: ^mazes::StaticItem
     }
 
     Control = struct {
@@ -17,16 +20,35 @@ type (
 )
 
 const (
-    mass            = 10000.0
-    diam            = 4.0
-    inertia         = 0.4 * mass * (diam / 2.0) * (diam / 2.0)
+    mass            = 7000.0
+    diam            = 6.0
+    radius          = diam / 2.0
+    inertia         = 0.4 * mass * radius * radius
 
-    force           = 100000.0
+    force           = 150000.0
     moment          = 25000.0
 
     frictionForceFactor  = 10000.0
     frictionMomentFactor = 10000.0
 )
+
+fn project(pos: mat::Vec, line: [2]mat::Vec): (real, real) {
+    pos[2] = 0.0
+    line[0][2] = 0.0
+    line[1][2] = 0.0
+
+    relPos := pos.sub(line[0])
+
+    lineDir := line[1].sub(line[0]).normalize()
+    normalDir := mat::Vec{lineDir[1], -lineDir[0], 0.0}
+
+    // relPos = proj * lineDir + dist * normalDir
+
+    proj := relPos.dot(lineDir)
+    dist := relPos.dot(normalDir)
+
+    return proj, dist
+}
 
 fn (state: ^State) control(): Control {
     ctrl := Control{}
@@ -39,11 +61,73 @@ fn (state: ^State) control(): Control {
     return ctrl
 }
 
-fn (state: ^State) update*(dt: real) {
+fn (state: ^State) collide(maze: ^mazes::Maze, root: int = 0) {
+    if root == -1 {
+        return
+    }
+
+    if root == 0 {
+        state.collidingItem = null
+    }
+    node := maze.bsp.items[root]
+
+    line := [2]mat::Vec{mazes::fromMaze(node.line.start), mazes::fromMaze(node.line.end)}
+
+    proj, dist := project(state.pos, line)
+
+    if fabs(dist) < radius && proj >= 0.0 && proj <= line[1].sub(line[0]).norm() {
+        item := &maze.static.items[node.indices.static]
+
+        floorHeight   := mazes::fromMaze(item.line.start, item.heights[0])[2]
+        ceilingHeight := mazes::fromMaze(item.line.start, item.heights[1])[2]
+
+        if floorHeight != ceilingHeight && floorHeight > state.pos[2] - radius / 2.0 && ceilingHeight < state.pos[2] + radius / 2.0 {
+            state.collidingItem = item
+            return
+        }
+    }    
+
+    if dist > -radius {
+        // Vehicle is to the left or not too far to the right of the root item - traverse the left subtree
+        state.collide(maze, node.indices.left)
+    }
+
+    if dist < radius {
+        // Vehicle is to the right or not too far to the left of the root item - traverse the right subtree
+        state.collide(maze, node.indices.right)
+    }
+}
+
+fn (state: ^State) addImpactImpulse() {
+    item := state.collidingItem
+
+    if item == null {
+        return
+    }
+
+    line := [2]mat::Vec{mazes::fromMaze(item.line.start, item.heights[0]), mazes::fromMaze(item.line.end, item.heights[0])}
+
+    lineDir := line[1].sub(line[0]).normalize()
+    normalDir := mat::Vec{lineDir[1], -lineDir[0], 0.0}
+
+    if state.pos.sub(line[0]).dot(normalDir) < 0.0 {
+        normalDir = normalDir.mul(-1.0)
+    }
+
+    normalVel := state.vel.dot(normalDir)
+    if normalVel < 0.0 {
+        state.vel = state.vel.sub(normalDir.mul(2.0 * normalVel))
+    }
+} 
+
+fn (state: ^State) update*(dt: real, maze: ^mazes::Maze) {
     ctrl := state.control()
 
     frictionForce := state.vel.mul(-frictionForceFactor)
     frictionMoment := state.rate.mul(-frictionMomentFactor)
+
+    state.collide(maze)
+    state.addImpactImpulse()
 
     state.vel = state.vel.add(state.rot.mulv(ctrl.force).add(frictionForce).mul(dt / mass))
     state.pos = state.pos.add(state.vel.mul(dt))

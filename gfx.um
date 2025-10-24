@@ -32,11 +32,6 @@ type (
     }
 )
 
-fn fromMaze(pos: mazes::Pos, height: int16 = 0): mat::Vec {
-    const mazeScale = 100.0
-    return {pos.y, pos.x, -height}.mul(1.0 / mazeScale)
-} 
-
 fn rightFrom(pos: mat::Vec, line: [2]mat::Vec): bool {
     pos[2] = 0.0
     line[0][2] = 0.0
@@ -204,14 +199,14 @@ fn (camera: ^Camera) renderBackground(textures: ^mazes::Texture) {
 fn (camera: ^Camera) renderStaticItem(item: ^mazes::StaticItem, textures: ^mazes::Texture) {
     heights := item.heights
     if heights[1] == heights[0] {
-        heights[1] += 8
+        heights[1] += 4
     }
 
     quad := Quad{
-        fromMaze(item.line.start, heights[1]),
-        fromMaze(item.line.end, heights[1]),
-        fromMaze(item.line.end, heights[0]),
-        fromMaze(item.line.start, heights[0]),        
+        mazes::fromMaze(item.line.start, heights[1]),
+        mazes::fromMaze(item.line.end, heights[1]),
+        mazes::fromMaze(item.line.end, heights[0]),
+        mazes::fromMaze(item.line.start, heights[0]),        
     }
 
     var cameraQuad: Quad
@@ -238,7 +233,7 @@ fn (camera: ^Camera) traverse(scene: ^Scene, root: int = 0) {
     for index != -1 {
         node := scene.maze.bsp.items[index]
 
-        line := [2]mat::Vec{fromMaze(node.line.start), fromMaze(node.line.end)}
+        line := [2]mat::Vec{mazes::fromMaze(node.line.start), mazes::fromMaze(node.line.end)}
 
         if rightFrom(camera.pos, line) {
             // Camera is to the right of the root item - traverse the left subtree first
@@ -279,7 +274,7 @@ fn (scene: ^Scene) render*(camera: ^Camera) {
 fn (scene: ^Scene) getHumanLocation*(): mat::Vec {
     for _, loc in scene.maze.location.items {
         if loc.name.data == "HUMAN_00" {
-            return fromMaze(loc.pos, loc.height)
+            return mazes::fromMaze(loc.pos, loc.height)
         }       
     }
     return {50.0, 50.0, -1.0}
