@@ -9,6 +9,8 @@ import (
     "phys.um"
 )
 
+const level = 1
+
 var (
     scene: gfx::Scene
     camera: gfx::Camera
@@ -18,12 +20,12 @@ var (
 fn init*() {
     window::setup("Hover! Maze Demo", 800, 600)
     
-    mazeFile, err := std::fopen("maze1.maz", "rb")
+    mazeFile, err := std::fopen(sprintf("maze%d.maz", level), "rb")
     std::exitif(err)
     scene.maze.read(mazeFile)
     std::fclose(mazeFile)
 
-    texFile, err := std::fopen("text1.tex", "rb")
+    texFile, err := std::fopen(sprintf("text%d.tex", level), "rb")
     std::exitif(err)
     scene.texture.read(texFile)
     std::fclose(texFile)

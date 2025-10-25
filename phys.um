@@ -1,4 +1,5 @@
 import (
+    "std.um"
     "mat.um"
 
     "input.um"
@@ -20,10 +21,10 @@ type (
 )
 
 const (
+    // Vehicle as a solid hemisphere
     mass            = 7000.0
-    diam            = 6.0
-    radius          = diam / 2.0
-    inertia         = 0.4 * mass * radius * radius
+    radius          = 3.0
+    inertia         = 2.0 / 5.0 * mass * radius * radius
 
     force           = 150000.0
     moment          = 25000.0
@@ -78,10 +79,16 @@ fn (state: ^State) collide(maze: ^mazes::Maze, root: int = 0) {
     if fabs(dist) < radius && proj >= 0.0 && proj <= line[1].sub(line[0]).norm() {
         item := &maze.static.items[node.indices.static]
 
-        floorHeight   := mazes::fromMaze(item.line.start, item.heights[0])[2]
-        ceilingHeight := mazes::fromMaze(item.line.start, item.heights[1])[2]
+        height := -state.pos[2]
 
-        if floorHeight != ceilingHeight && floorHeight > state.pos[2] - radius / 2.0 && ceilingHeight < state.pos[2] + radius / 2.0 {
+        top    := -mazes::fromMaze({0, 0}, item.heights[0])[2]
+        bottom := -mazes::fromMaze({0, 0}, item.heights[1])[2]
+
+        if top < bottom {
+            top, bottom = bottom, top
+        }
+
+        if !(top == bottom || height > top || height < bottom) {
             state.collidingItem = item
             return
         }

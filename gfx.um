@@ -9,9 +9,17 @@ import (
     "mazes.um"
 )
 
-// X forward
-// Y rightward
-// Z downward
+/* 
+Our axes:
+    X: north or forward
+    Y: east or rightward
+    Z: downward
+
+Original maze axes:
+    X: east
+    Y: south
+    Z: upward
+*/
 
 const deg* = std::pi / 180.0
 
@@ -32,7 +40,7 @@ type (
     }
 )
 
-fn rightFrom(pos: mat::Vec, line: [2]mat::Vec): bool {
+fn rightFromLine(pos: mat::Vec, line: [2]mat::Vec): bool {
     pos[2] = 0.0
     line[0][2] = 0.0
     line[1][2] = 0.0
@@ -52,15 +60,15 @@ fn (camera: ^Camera) setup*(pos: mat::Vec, rot: mat::Mat, width, height, fov, dp
 }
 
 fn (camera: ^Camera) visible(line: [2]mat::Vec): bool {
-    if rightFrom(line[0], {camera.pos, camera.fovRight}) && rightFrom(line[1], {camera.pos, camera.fovRight}) {
+    if rightFromLine(line[0], {camera.pos, camera.fovRight}) && rightFromLine(line[1], {camera.pos, camera.fovRight}) {
         return false
     }
 
-    if !rightFrom(line[0], {camera.pos, camera.fovLeft}) && !rightFrom(line[1], {camera.pos, camera.fovLeft}) {
+    if !rightFromLine(line[0], {camera.pos, camera.fovLeft}) && !rightFromLine(line[1], {camera.pos, camera.fovLeft}) {
         return false
     }
 
-    if rightFrom(line[0], {camera.fovLeft, camera.fovRight}) && rightFrom(line[1], {camera.fovLeft, camera.fovRight}) {
+    if rightFromLine(line[0], {camera.fovLeft, camera.fovRight}) && rightFromLine(line[1], {camera.fovLeft, camera.fovRight}) {
         return false
     }
 
@@ -118,7 +126,13 @@ fn (camera: ^Camera) clip(cameraQuad: ^Quad, tex: ^image::Image) {
         if visiblePart >= 0.0 && visiblePart < visiblePartClippedAtEnd {
             visiblePartClippedAtEnd = visiblePart
         }
-    }             
+    }
+
+    // Floor - affects texture only
+    visiblePartClippedAtBottom := (cameraQuad[0][2] - cameraQuad[2][2]) / mazes::fromMaze({0, 0}, round(tex.getDims().y))[2]
+    if visiblePartClippedAtBottom > 1.0 {
+        visiblePartClippedAtBottom = 1.0
+    }
 
     // Apply clipping
     clippedCameraQuad := cameraQuad^
@@ -138,13 +152,12 @@ fn (camera: ^Camera) clip(cameraQuad: ^Quad, tex: ^image::Image) {
     }
 
     cameraQuad^ = clippedCameraQuad
-    tex.crop({1.0 - visiblePartClippedAtEnd, 0.0}, {visiblePartClippedAtStart, 1.0})    
+    tex.crop({1.0 - visiblePartClippedAtStart, 0.0}, {visiblePartClippedAtEnd, visiblePartClippedAtBottom})    
 }
 
 fn (camera: ^Camera) perspective(point: mat::Vec): th::Vf2 {
-    if point[0] == 0.0 {
-        return {0, 0}
-    }
+    std::assert(point[0] != 0.0)
+
     projFactor := camera.near / point[0]
 
     return {
@@ -154,77 +167,92 @@ fn (camera: ^Camera) perspective(point: mat::Vec): th::Vf2 {
 }
 
 fn (camera: ^Camera) renderBackground(textures: ^mazes::Texture) {
+    // Sky
     background := textures.getBackgroundTexture()
     std::assert(background.validate())
 
     backgroundSize := background.getDims()
-    filledPart := (backgroundSize.y - backgroundSize.x) / backgroundSize.y
-    backgroundSize.y -= backgroundSize.x
 
-    const wrap = fn (x: real): real {
-        if x >= 360.0 {return x - 360.0}
-        if x <    0.0 {return x + 360.0}
-        return x
-    }    
-
-    yaw := wrap(camera.rot.toAttAngles()[2] / deg)
-
-    halfFoV := atan2(camera.width / 2.0, camera.near) / deg
-
-    stripStart := wrap(yaw - halfFoV) / 360.0
-    stripEnd   := wrap(yaw + halfFoV) / 360.0
-
-    scale := camera.width / (2.0 * halfFoV / 360.0 * backgroundSize.y)
-    
-    canvas::drawRect(0x000000FF, {0, 0, camera.width, camera.height / 2.0})
-
-    yOffset := camera.height / 2.0
-
-    if stripEnd > stripStart {
-        background.crop({0.0, stripStart * filledPart}, {1.0, stripEnd * filledPart})
-        background.draw(th::mkTransform({0, yOffset}, {scale, scale}, {0, 0}, -90.0))
+    if backgroundSize.x == backgroundSize.y {
+        canvas::drawRect(0x777777FF, {0, 0, camera.width, camera.height / 2.0})
     } else {
-        background.crop({0.0, stripStart * filledPart}, {1.0, filledPart})
-        background.draw(th::mkTransform({0, yOffset}, {scale, scale}, {0, 0}, -90.0))
+        filledPart := (backgroundSize.y - backgroundSize.x) / backgroundSize.y
+        backgroundSize.y -= backgroundSize.x
 
-        xOffset := (1.0 - stripStart) / (1.0 - stripStart + stripEnd) * camera.width
+        const wrap = fn (x: real): real {
+            if x >= 360.0 {return x - 360.0}
+            if x <    0.0 {return x + 360.0}
+            return x
+        }    
 
-        background.crop({0.0, 0.0}, {1.0, stripEnd * filledPart})
-        background.draw(th::mkTransform({xOffset, yOffset}, {scale, scale}, {0, 0}, -90.0))        
+        yaw := wrap(camera.rot.toAttAngles()[2] / deg)
+
+        halfFoV := atan2(camera.width / 2.0, camera.near) / deg
+
+        stripStart := wrap(yaw - halfFoV) / 360.0
+        stripEnd   := wrap(yaw + halfFoV) / 360.0
+
+        scale := camera.width / (2.0 * halfFoV / 360.0 * backgroundSize.y)
+        
+        canvas::drawRect(0x000000FF, {0, 0, camera.width, camera.height / 2.0})
+
+        yOffset := camera.height / 2.0
+
+        if stripEnd > stripStart {
+            background.crop({0.0, stripStart * filledPart}, {1.0, stripEnd * filledPart})
+            background.draw(th::mkTransform({0, yOffset}, {scale, scale}, {0, 0}, -90.0))
+        } else {
+            background.crop({0.0, stripStart * filledPart}, {1.0, filledPart})
+            background.draw(th::mkTransform({0, yOffset}, {scale, scale}, {0, 0}, -90.0))
+
+            xOffset := (1.0 - stripStart) / (1.0 - stripStart + stripEnd) * camera.width
+
+            background.crop({0.0, 0.0}, {1.0, stripEnd * filledPart})
+            background.draw(th::mkTransform({xOffset, yOffset}, {scale, scale}, {0, 0}, -90.0))        
+        }        
     }
 
+    // Ground
     canvas::drawRect(0x333333FF, {0, camera.height / 2.0, camera.width, camera.height}) 
 }
 
 fn (camera: ^Camera) renderStaticItem(item: ^mazes::StaticItem, textures: ^mazes::Texture) {
-    heights := item.heights
-    if heights[1] == heights[0] {
-        heights[1] += 4
+    textures.buildTiles(item)    
+
+    tileHeights := item.heights
+    if tileHeights[1] == tileHeights[0] {
+        tileHeights[1] += 4
     }
 
-    quad := Quad{
-        mazes::fromMaze(item.line.start, heights[1]),
-        mazes::fromMaze(item.line.end, heights[1]),
-        mazes::fromMaze(item.line.end, heights[0]),
-        mazes::fromMaze(item.line.start, heights[0]),        
-    }
-
-    var cameraQuad: Quad
-    for i, vert in quad {
-        cameraQuad[i] = camera.invRot.mulv(vert.sub(camera.pos))
-    }
-
-    tex := textures.getItemTexture(item)
+    tex := item.tileTexture
     std::assert(tex.validate())
 
-    camera.clip(&cameraQuad, &tex)
+    for _, tile in item.tiles {
+        quad := Quad{
+            mazes::fromMaze(tile.end, tileHeights[1]),
+            mazes::fromMaze(tile.start, tileHeights[1]),
+            mazes::fromMaze(tile.start, tileHeights[0]),
+            mazes::fromMaze(tile.end, tileHeights[0]),        
+        }
 
-    var screenQuad: th::Quad
-    for i, vert in cameraQuad {
-        screenQuad[i] = camera.perspective(vert)
+        if !camera.visible({quad[0], quad[1]}) {
+            continue
+        }
+
+        var cameraQuad: Quad
+        for i, vert in quad {
+            cameraQuad[i] = camera.invRot.mulv(vert.sub(camera.pos))
+        }
+
+        camera.clip(&cameraQuad, &tex)
+
+        var screenQuad: th::Quad
+        for i, vert in cameraQuad {
+            screenQuad[i] = camera.perspective(vert)
+        }
+
+        tex.drawOnQuad(screenQuad)        
     }
-
-    tex.drawOnQuad(screenQuad)
 }
 
 fn (camera: ^Camera) traverse(scene: ^Scene, root: int = 0) {
@@ -235,14 +263,12 @@ fn (camera: ^Camera) traverse(scene: ^Scene, root: int = 0) {
 
         line := [2]mat::Vec{mazes::fromMaze(node.line.start), mazes::fromMaze(node.line.end)}
 
-        if rightFrom(camera.pos, line) {
+        if rightFromLine(camera.pos, line) {
             // Camera is to the right of the root item - traverse the left subtree first
             camera.traverse(scene, node.indices.left)
 
             // Render the root item
-            if camera.visible(line) {
-                camera.renderStaticItem(&scene.maze.static.items[node.indices.static], &scene.texture)
-            }
+            camera.renderStaticItem(&scene.maze.static.items[node.indices.static], &scene.texture)
 
             // Proceed to the right subtree
             index = node.indices.right
@@ -251,12 +277,10 @@ fn (camera: ^Camera) traverse(scene: ^Scene, root: int = 0) {
             camera.traverse(scene, node.indices.right)
 
             // Render the root item
-            if camera.visible(line) {
-                camera.renderStaticItem(&scene.maze.static.items[node.indices.static], &scene.texture)
-            }
+            camera.renderStaticItem(&scene.maze.static.items[node.indices.static], &scene.texture)
 
             // Proceed to the left subtree
-            index = node.indices.left            
+            index = node.indices.left
         }
     }
 }

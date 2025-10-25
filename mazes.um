@@ -2,7 +2,6 @@ import (
     "std.um"
     "mat.um"
 
-    "th.um"
     "image.um"
 )
 
@@ -46,7 +45,8 @@ type (
         textures: [6]String
         heights: [2]int16
         flags: [16]uint8
-        tiledTexture: image::Image
+        tiles: []Line        
+        tileTexture: image::Image
     }
 
     Static* = struct {
@@ -82,7 +82,7 @@ type (
     }
 
     BSPIndices* = struct {
-        static, dummy2, right, left: int16
+        static, dummy2, left, right: int16
     }
 
     BSPItem* = struct {
@@ -149,15 +149,10 @@ type (
         dummy2: [2]uint8
     }
 
-    TextureImageData* = struct {
-        data: []uint32
-        width, height: int
-    }
-
     Texture* = struct {
         header: TextureHeader
         items: []TextureItem
-        cache: map[struct {name: str; logScale: int}]TextureImageData
+        itemTextures: map[struct {name: str; logScale: int}]image::Image
         backgroundTexture, dummyTexture: image::Image
     }
 )
@@ -289,8 +284,8 @@ fn (this: ^BSP) check(root: int16 = 0): int {
     if node.indices.left != -1 {
         child := this.items[node.indices.left]
 
-        std::assert(child.line.start.distFrom(node.line) <= 0)
-        std::assert(child.line.end.distFrom(node.line) <= 0)
+        std::assert(child.line.start.distFrom(node.line) >= 0.0)
+        std::assert(child.line.end.distFrom(node.line) >= 0.0)
 
         count += this.check(node.indices.left)
     }
@@ -298,8 +293,8 @@ fn (this: ^BSP) check(root: int16 = 0): int {
     if node.indices.right != -1 {
         child := this.items[node.indices.right]
 
-        std::assert(child.line.start.distFrom(node.line) >= 0)
-        std::assert(child.line.end.distFrom(node.line) >= 0)
+        std::assert(child.line.start.distFrom(node.line) <= 0.0)
+        std::assert(child.line.end.distFrom(node.line) <= 0.0)
 
         count += this.check(node.indices.right)
     }
@@ -367,8 +362,6 @@ fn (this: ^TextureBitmap) read(f: std::File) {
 
     std::exitif(std::fread(f, &this.numOfSomething).item1)
 
-    //printf("        numOfSomething = %v\n", this.numOfSomething)
-
     this.scanlines = make([]TextureScanline, this.header.width)
     for _, scanline^ in this.scanlines {
         scanline.read(f)
@@ -383,12 +376,10 @@ fn (this: ^TextureBitmap) read(f: std::File) {
     }
 
     var dummy: int16
-    std::exitif(std::fread(f, &dummy).item1)    
-
-    //printf("        footer = %v\n", this.footer)      
+    std::exitif(std::fread(f, &dummy).item1)
 }
 
-fn (this: ^TextureBitmap) toImageData(palette: ^TexturePalette, logScale: int): TextureImageData {
+fn (this: ^TextureBitmap) toImage(palette: ^TexturePalette, logScale: int): image::Image {
     imageData := make([]uint32, this.header.width * this.header.height)
 
     rawIndex := 0
@@ -403,7 +394,10 @@ fn (this: ^TextureBitmap) toImageData(palette: ^TexturePalette, logScale: int): 
         }
     }
 
-    return {imageData, this.header.width, this.header.height}
+    image, err := image::mk(imageData, {this.header.width, this.header.height})
+    std::exitif(err)
+
+    return image
 }
 
 fn (this: ^TextureItem) read(f: std::File) {
@@ -432,22 +426,73 @@ fn (this: ^Texture) read*(f: std::File) {
     }       
 }
 
-fn (this: ^Texture) getItemData(name: str, logScale: int = 0): TextureImageData {
-    if name == "" {
-        return {}
+fn (this: ^Texture) getNamedTexture(name: str, logScale: int = 0): image::Image {
+    if !this.dummyTexture.validate() {
+        this.dummyTexture = image::mk({0x777777FF}, {1, 1}).item0
     }
 
-    if !validkey(this.cache, {name, logScale}) {
+    if name == "" {
+        return this.dummyTexture
+    }
+
+    if !validkey(this.itemTextures, {name, logScale}) {
         for _, item^ in this.items {
             if name == item.name.data {
-                imageData := item.bitmaps[logScale].toImageData(&this.header.palette, logScale)
-                this.cache[{name, logScale}] = imageData
-                return imageData
+                image := item.bitmaps[logScale].toImage(&this.header.palette, logScale)
+                this.itemTextures[{name, logScale}] = image
+                return image
             }
         }
+        return this.dummyTexture
     }
 
-    return this.cache[{name, logScale}]
+    return this.itemTextures[{name, logScale}]
+}
+
+fn (this: ^Texture) buildTiles*(item: ^StaticItem) {
+    if len(item.tiles) > 0 {
+        return
+    }
+
+    item.tileTexture = this.getNamedTexture(item.textures[2].data)
+    if item.tileTexture == this.dummyTexture {
+        item.tiles = append(item.tiles, item.line)
+        return
+    }
+
+    itemDir := Pos{item.line.end.x - item.line.start.x, item.line.end.y - item.line.start.y}
+
+    itemWidth := item.line.length()
+    itemHeight := real(item.heights[1] - item.heights[0])
+
+    if itemHeight == 0.0 {
+        item.tiles = append(item.tiles, item.line)
+        item.tileTexture = this.dummyTexture
+        return
+    }
+
+    tileSize := item.tileTexture.getDims()
+
+    tileScale := itemHeight / tileSize.y
+    if tileScale < 1.0 {
+        tileScale = 1.0
+    }
+
+    numTiles := round(itemWidth / (tileSize.x * tileScale))
+
+    for i := 0; i < numTiles; i++ {      
+        tile := Line{
+            {
+                item.line.start.x + itemDir.x * i / numTiles, 
+                item.line.start.y + itemDir.y * i / numTiles
+            },
+            {
+                item.line.start.x + itemDir.x * (i + 1) / numTiles, 
+                item.line.start.y + itemDir.y * (i + 1) / numTiles
+            },
+        }
+        item.tiles = append(item.tiles, tile)
+    }
 }
 
 fn (this: ^Texture) getBackgroundTexture*(): image::Image {
@@ -455,63 +500,11 @@ fn (this: ^Texture) getBackgroundTexture*(): image::Image {
         return this.backgroundTexture
     }
 
-    background := this.getItemData("BACKGRND")
-
-    for _, pix^ in background.data {
-        pix^ |= 0x000000FF
-    }
-
-    image, err := image::mk(background.data, {background.width, background.height})
-    std::exitif(err)
-
-    this.backgroundTexture = image
+    this.backgroundTexture = this.getNamedTexture("BACKGRND")
     return this.backgroundTexture
-}
-
-fn (this: ^Texture) getItemTexture*(item: ^StaticItem): image::Image {
-    if item.tiledTexture.validate() {
-        return item.tiledTexture
-    }
-
-    if !this.dummyTexture.validate() {
-        this.dummyTexture = image::mk({th::white, th::white, th::white, th::white}, {2, 2}).item0
-    }
-
-    tile := this.getItemData(item.textures[2].data)
-    if tile == {} {
-        return this.dummyTexture
-    }
-
-    quadWidth := round(item.line.length())
-    quadHeight := item.heights[1] - item.heights[0]
-
-    if quadHeight == 0 {
-        return this.dummyTexture
-    }
-
-    if quadHeight > tile.height {
-        quadWidth = tile.height * quadWidth / quadHeight
-        quadHeight = tile.height
-    }
-
-    quadData := make([]uint32, quadWidth * quadHeight)
-
-    for x := 0; x < quadWidth; x++ {
-        for y := 0; y < quadHeight; y++ {
-            quadData[quadWidth * y + x] = tile.data[tile.width * y + (x % tile.width)]
-        }
-    }
-
-    image, err := image::mk(quadData, {quadWidth, quadHeight})
-    std::exitif(err)
-
-    image.flipv(true)
-
-    item.tiledTexture = image
-    return image    
 }
 
 fn fromMaze*(pos: Pos, height: int16 = 0): mat::Vec {
     const mazeScale = 100.0
-    return {pos.y, pos.x, -height}.mul(1.0 / mazeScale)
+    return {-pos.y, pos.x, -height}.mul(1.0 / mazeScale)
 } 
