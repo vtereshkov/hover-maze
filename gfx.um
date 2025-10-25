@@ -227,6 +227,9 @@ fn (camera: ^Camera) renderStaticItem(item: ^mazes::StaticItem, textures: ^mazes
     tex := item.tileTexture
     std::assert(tex.validate())
 
+    var prevCameraQuad: Quad
+    prevCameraQuadValid := false
+
     for _, tile in item.tiles {
         quad := Quad{
             mazes::fromMaze(tile.end, tileHeights[1]),
@@ -236,13 +239,23 @@ fn (camera: ^Camera) renderStaticItem(item: ^mazes::StaticItem, textures: ^mazes
         }
 
         if !camera.visible({quad[0], quad[1]}) {
+            prevCameraQuadValid = false
             continue
         }
 
         var cameraQuad: Quad
-        for i, vert in quad {
-            cameraQuad[i] = camera.invRot.mulv(vert.sub(camera.pos))
+        for i in quad {
+            if prevCameraQuadValid && i == 1 {
+                cameraQuad[1] = prevCameraQuad[0] 
+            } else if prevCameraQuadValid && i == 2 {
+                cameraQuad[2] = prevCameraQuad[3]
+            } else {
+                cameraQuad[i] = camera.invRot.mulv(quad[i].sub(camera.pos))
+            }
         }
+
+        prevCameraQuad = cameraQuad
+        prevCameraQuadValid = true
 
         camera.clip(&cameraQuad, &tex)
 
