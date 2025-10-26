@@ -1,5 +1,4 @@
 import (
-    "std.um"
     "mat.um"
 
     "input.um"
