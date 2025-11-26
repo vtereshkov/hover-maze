@@ -20,15 +20,17 @@ var (
 fn init*() {
     window::setup("Hover! Maze Demo", 800, 600)
     
-    mazeFile, err := std::fopen(sprintf("maze%d.maz", level), "rb")
-    std::exitif(err)
-    scene.maze.read(mazeFile)
-    std::fclose(mazeFile)
+    {
+        mazeFile, err := std::fopen(sprintf("maze%d.maz", level), "rb")
+        std::exitif(err)
+        scene.maze.read(mazeFile)
+    }
 
-    texFile, err := std::fopen(sprintf("text%d.tex", level), "rb")
-    std::exitif(err)
-    scene.texture.read(texFile)
-    std::fclose(texFile)
+    {
+        texFile, err := std::fopen(sprintf("text%d.tex", level), "rb")
+        std::exitif(err)
+        scene.texture.read(texFile)
+    }
 
     state.pos = scene.getHumanLocation()
     state.rot = mat::Vec{0.0, 0.0, 90.0}.mul(gfx::deg).toAttMat()
