@@ -4,17 +4,54 @@ import (
 
     "th.um"
     "window.um"
+    "rt.um"
+    "image.um"
+    "input.um"
 
     "gfx.um"
     "phys.um"
 )
 
+type Eye = struct {
+    offset: real
+    misalign, misalignMax: mat::Vec
+    filter: uint32
+    render: rt::RenderTarget
+    image: image::Image
+}
+
+fn (this: ^Eye) update(effort: real) {
+    const tau = 0.3
+    this.misalign = this.misalign.add(this.misalignMax.sub(this.misalign).div(tau).sub(this.misalign.div(tau).mul(effort)).mul(th::delta / 1000.0))
+} 
+
+fn (this: ^Eye) draw(scene: ^gfx::Scene, state: ^phys::State) {
+    pos := state.pos.add(state.rot.mulv({0, this.offset, 0}))
+    rot := state.att.add(this.misalign).toAttMat()
+
+    var camera: gfx::Camera
+    camera.setup(pos, rot, window::w, window::h, 30.0 * gfx::deg, 100)    
+
+    var err: std::Err
+
+    this.render, err = rt::mk({window::w, window::h}, .linear)
+    std::exitif(err)
+
+    std::exitif(this.render.begin(true))
+        scene.render(&camera)
+    std::exitif(this.render.end())
+
+    this.image = this.render.toImage()
+    this.image.draw(th::mkTransform({0, 0}, {1, 1}, {0, 0}, 0), this.filter)    
+}
+
 const level = 1
 
 var (
     scene: gfx::Scene
-    camera: gfx::Camera
     state: phys::State
+    leftEye, rightEye: Eye
+    strabismic: bool
 )
 
 fn init*() {
@@ -35,11 +72,32 @@ fn init*() {
     state.pos = scene.getHumanLocation()
     state.rot = mat::Vec{0.0, 0.0, 90.0}.mul(gfx::deg).toAttMat()
 
+    rightEye = {filter: 0x00000000}
+    leftEye  = {filter: 0xFFFFFFFF}
+
     window::onFrame.register({
         window::setViewport(window::getDims())
-        camera.setup(state.pos, state.rot, window::w, window::h, 30.0 * gfx::deg, 100)
 
         state.update(th::delta / 1000.0, &scene.maze)
-        scene.render(&camera)       
+
+        if input::isJustPressedc('s') {
+            strabismic = !strabismic
+
+            if strabismic {
+                rightEye = {offset: 0.1, misalignMax: {0, 1.0, 10.0}.mul(gfx::deg), filter: 0x4F4F4FFF}
+                leftEye  = {filter: 0xAFAFAF00}
+            } else {
+                rightEye = {filter: 0x00000000}
+                leftEye  = {filter: 0xFFFFFFFF}
+            }            
+        } 
+
+        if strabismic {
+            rightEye.update(input::isPressed(.space) ? 2.0 : 0.0)
+            rightEye.draw(&scene, &state)            
+        }
+
+        leftEye.update(0) 
+        leftEye.draw(&scene, &state)       
     })
 }
