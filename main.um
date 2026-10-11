@@ -84,8 +84,8 @@ fn init*() {
             strabismic = !strabismic
 
             if strabismic {
-                rightEye = {offset: 0.1, misalignMax: {0, 1.0, 10.0}.mul(gfx::deg), filter: 0x4F4F4FFF}
-                leftEye  = {filter: 0xAFAFAF00}
+                rightEye = {offset: 0.1, misalignMax: {0, 1.0, 10.0}.mul(gfx::deg), filter: 0xFFFFFFFF}
+                leftEye  = {filter: 0xFFFFFFAF}
             } else {
                 rightEye = {filter: 0x00000000}
                 leftEye  = {filter: 0xFFFFFFFF}
