@@ -52,6 +52,7 @@ var (
     state: phys::State
     leftEye, rightEye: Eye
     strabismic: bool
+    count: int
 )
 
 fn init*() {
@@ -98,6 +99,9 @@ fn init*() {
         leftEye.update(0) 
         leftEye.draw(&scene, &state)
 
-        gc()       
+        if count % 10 == 0 {
+            gc()                // Protection against Tophat (Sokol) buffers overflow 
+        }
+        count++       
     })
 }
